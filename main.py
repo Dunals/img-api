@@ -13,24 +13,43 @@ app = Flask(__name__)
 def get_fresh_token():
     v_token = None
     with sync_playwright() as p:
+        # Render/Docker වලට හරියන්න Arguments පාස් කරනවා
         context = p.chromium.launch_persistent_context(
             "./fixart_browser_data", 
-            headless=True 
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"] 
         )
         page = context.pages[0] if context.pages else context.new_page()
         
         def handle_request(route):
             nonlocal v_token
-            headers = route.request.headers
-            if "vtoken" in headers:
-                v_token = headers["vtoken"]
-            route.continue_()
+            req_obj = route.request
+            
+            # vtoken එක තියෙනවද කියලා බලනවා
+            if "vtoken" in req_obj.headers:
+                v_token = req_obj.headers["vtoken"]
+            
+            # පින්තූර, CSS සහ ෆොන්ට් ලෝඩ් වෙන එක නවත්තනවා RAM එක ඉතුරු කරන්න
+            if req_obj.resource_type in ["image", "stylesheet", "font", "media"]:
+                route.abort()
+            else:
+                route.continue_()
         
-        page.route("**/*.{png,jpg,jpeg,webp,gif}", lambda route: route.abort())
         page.route("**/*", handle_request)
         
-        page.goto("https://fixart.ai/text-to-image/", timeout=60000)
-        page.wait_for_timeout(4000)
+        try:
+            # සම්පූර්ණයෙන්ම ලෝඩ් වෙනකන් ඉන්නේ නෑ, domcontentloaded වලින් නවත්තනවා. Timeout එක 120s කරනවා.
+            page.goto("https://fixart.ai/text-to-image/", timeout=120000, wait_until="domcontentloaded")
+            
+            # ටෝකන් එක එනකන් තත්පර 30ක් උපරිම බලන් ඉන්නවා
+            for _ in range(30):
+                if v_token:
+                    break
+                page.wait_for_timeout(1000)
+                
+        except Exception as e:
+            print(f"Page load info (ignore if token is caught): {e}")
+            
         context.close()
         
     return v_token
