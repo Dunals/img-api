@@ -1,0 +1,4 @@
+flask
+playwright
+curl_cffi
+pycryptodome
